@@ -811,6 +811,48 @@ static void emit_track_descr_explicit(pb_ostream_t *stream, __u64 track_uuid, __
 	emit_track_descr_impl(stream, track_uuid, parent_track_uuid, name, rank, EXPLICIT);
 }
 
+static void emit_track_descr_with_process(pb_ostream_t *stream, u64 track_uuid, u64 parent_uuid, const char *name, int pid, const char *process_name)
+{
+	TracePacket desc = {
+		PB_TRUST_SEQ_ID(PB_SEQ_ID_GENERIC),
+		PB_ONEOF(data, TracePacket_track_descriptor) = { .track_descriptor = {
+			PB_INIT(uuid) = track_uuid,
+			.parent_uuid = parent_uuid,
+			.has_parent_uuid = parent_uuid != 0,
+			PB_ONEOF(static_or_dynamic_name, TrackDescriptor_name) = { .name = PB_STRING(name) },
+			PB_INIT(process) = {
+				PB_INIT(pid) = pid,
+				.process_name = PB_STRING(process_name),
+			},
+			PB_INIT(child_ordering) = perfetto_protos_TrackDescriptor_ChildTracksOrdering_EXPLICIT,
+			PB_INIT(sibling_merge_behavior) = perfetto_protos_TrackDescriptor_SiblingMergeBehavior_SIBLING_MERGE_BEHAVIOR_NONE,
+		}},
+	};
+	emit_trace_packet(stream, &desc);
+}
+
+static void emit_track_descr_with_thread(pb_ostream_t *stream, u64 track_uuid, u64 parent_uuid, const char *name, int rank, int tid, int pid)
+{
+	TracePacket desc = {
+		PB_TRUST_SEQ_ID(PB_SEQ_ID_GENERIC),
+		PB_ONEOF(data, TracePacket_track_descriptor) = { .track_descriptor = {
+			PB_INIT(uuid) = track_uuid,
+			.parent_uuid = parent_uuid,
+			.has_parent_uuid = parent_uuid != 0,
+			PB_ONEOF(static_or_dynamic_name, TrackDescriptor_name) = { .name = PB_STRING(name) },
+			PB_INIT(thread) = {
+				PB_INIT(tid) = tid,
+				PB_INIT(pid) = pid,
+			},
+			PB_INIT(child_ordering) = perfetto_protos_TrackDescriptor_ChildTracksOrdering_CHRONOLOGICAL,
+			.sibling_order_rank = rank,
+			.has_sibling_order_rank = rank != 0,
+			PB_INIT(sibling_merge_behavior) = perfetto_protos_TrackDescriptor_SiblingMergeBehavior_SIBLING_MERGE_BEHAVIOR_NONE,
+		}},
+	};
+	emit_trace_packet(stream, &desc);
+}
+
 static void emit_process_track_descr(pb_ostream_t *stream, const struct wprof_task *t)
 {
 	const char *pcomm;
@@ -3342,8 +3384,8 @@ static u64 ensure_pytrace_proc_track(int pid, const char *proc_name)
 	u64 track_uuid = trackid_pytrace_proc(pid);
 
 	if (!s->exists) {
-		emit_track_descr_explicit(cur_stream, track_uuid, TRACK_UUID_PYTRACE,
-					  sfmt("%s %d", proc_name, pid), 0);
+		emit_track_descr_with_process(cur_stream, track_uuid, TRACK_UUID_PYTRACE,
+					      sfmt("%s %d", proc_name, pid), pid, proc_name);
 		s->exists = true;
 	}
 	return track_uuid;
@@ -3357,8 +3399,8 @@ static u64 ensure_pytrace_thread_track(int pid, int tid, const char *proc_name, 
 	u64 track_uuid = trackid_pytrace_thread(tid);
 
 	if (!s->exists) {
-		emit_track_descr(cur_stream, track_uuid, trackid_pytrace_proc(pid),
-				 sfmt("%s %d", comm, tid), tid);
+		emit_track_descr_with_thread(cur_stream, track_uuid, trackid_pytrace_proc(pid),
+					     sfmt("%s %d", comm, tid), tid, tid, pid);
 		s->exists = true;
 	}
 	return track_uuid;
